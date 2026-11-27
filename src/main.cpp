@@ -54,4 +54,75 @@ class $modify(ClickFixLayer, GJBaseGameLayer) {
                 pending = Pending{};
                 if (player && needsSurface(player) && !player->m_isDead && !canActNow(player)) {
                     pending.ticks = static_cast<int>(
-                        Mod::get()->getSettingValue
+                        Mod::get()->getSettingValue<int64_t>("window-ticks"));
+                    pending.isPlayer1 = isPlayer1;
+                }
+            }
+            else if (pending.ticks > 0) {
+                pending.released = true;
+            }
+        }
+        GJBaseGameLayer::handleButton(down, button, isPlayer1);
+    }
+
+    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+        if (this->isActive()) {
+            for (int slot = 0; slot < 2; slot++) {
+                auto& pending = s_pending[slot];
+                auto player = this->playerFor(slot);
+                if (!player) continue;
+
+                if (pending.releaseNext) {
+                    if (!isHalfTick) {
+                        GJBaseGameLayer::handleButton(false, 1, pending.isPlayer1);
+                        pending = Pending{};
+                    }
+                    continue;
+                }
+                if (pending.ticks <= 0) continue;
+
+                if (player->m_isDead || !needsSurface(player)) {
+                    pending = Pending{};
+                }
+                else if (canActNow(player)) {
+                    if (pending.released) {
+                        // El click llego antes de tiempo: se repite ahora
+                        s_usedAssist = true;
+                        PlayLayer::get()->m_isTestMode = true;
+                        GJBaseGameLayer::handleButton(true, 1, pending.isPlayer1);
+                        pending.ticks = 0;
+                        pending.releaseNext = true;
+                    }
+                    else {
+                        // Sigue pulsado: el juego ya lo resuelve solo
+                        pending = Pending{};
+                    }
+                }
+                else if (!isHalfTick) {
+                    pending.ticks--;
+                }
+            }
+        }
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+    }
+};
+
+class $modify(ClickFixPlayLayer, PlayLayer) {
+    bool init(GJGameLevel* level, bool dontCreateObjects) {
+        clearPending();
+        s_usedAssist = false;
+        if (!PlayLayer::init(level, dontCreateObjects)) return false;
+        s_oldTestMode = m_isTestMode;
+        return true;
+    }
+
+    void resetLevel() {
+        clearPending();
+        // Un intento nuevo empieza limpio
+        if (s_usedAssist) {
+            m_isTestMode = s_oldTestMode;
+            s_usedAssist = false;
+        }
+        PlayLayer::resetLevel();
+    }
+};
