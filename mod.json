@@ -6,9 +6,9 @@
     },
     "id": "usuario.click-fix",
     "name": "Click Fix",
-    "version": "v1.0.0",
+    "version": "v1.1.0",
     "developer": "Usuario",
-    "description": "Guarda los clicks adelantados y los aplica al aterrizar o tocar un orbe.",
+    "description": "Corrige clicks adelantados y ayuda en wave.",
     "settings": {
         "enabled": {
             "type": "bool",
@@ -22,6 +22,27 @@
             "default": 12,
             "min": 1,
             "max": 48
+        },
+        "wave-min-tap": {
+            "type": "int",
+            "name": "Wave: toque minimo (ticks)",
+            "description": "Alarga los toques muy cortos. 0 lo desactiva.",
+            "default": 4,
+            "min": 0,
+            "max": 20
+        },
+        "wave-predict": {
+            "type": "bool",
+            "name": "Wave: prediccion",
+            "description": "Retrasa un cambio si hacerlo ya te haria chocar. Es aproximada.",
+            "default": true
+        },
+        "wave-max-delay": {
+            "type": "int",
+            "name": "Wave: retraso maximo (ticks)",
+            "default": 3,
+            "min": 1,
+            "max": 8
         }
     }
 }
