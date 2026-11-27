@@ -6,7 +6,7 @@
     },
     "id": "usuario.click-fix",
     "name": "Click Fix",
-    "version": "v1.2.0",
+    "version": "v1.3.0",
     "developer": "Usuario",
     "description": "Corrige clicks adelantados y ayuda en wave y nave.",
     "settings": {
