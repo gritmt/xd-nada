@@ -3,6 +3,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 using namespace geode::prelude;
@@ -43,6 +44,43 @@ namespace {
 
     WaveState s_wave[2];
 
+    // Ajustes en memoria, para no buscarlos por nombre en cada tick
+    struct Settings {
+        bool enabled = true, wavePredict = true, shipPredict = true, shipStraight = true;
+        int windowTicks = 12, waveMinTap = 4, waveMaxDelay = 3;
+        int shipMinTap = 3, shipMaxDelay = 4, straightStrength = 40;
+
+        void load() {
+            auto mod = Mod::get();
+            auto flag = [&](char const* key) { return mod->getSettingValue<bool>(key); };
+            auto number = [&](char const* key) {
+                return static_cast<int>(mod->getSettingValue<int64_t>(key));
+            };
+            enabled = flag("enabled");
+            wavePredict = flag("wave-predict");
+            shipPredict = flag("ship-predict");
+            shipStraight = flag("ship-straight");
+            windowTicks = number("window-ticks");
+            waveMinTap = number("wave-min-tap");
+            waveMaxDelay = number("wave-max-delay");
+            shipMinTap = number("ship-min-tap");
+            shipMaxDelay = number("ship-max-delay");
+            straightStrength = number("ship-straight-strength");
+        }
+    };
+
+    Settings s_cfg;
+    int s_reloadIn = 0;
+
+    // Solo bloques y pinchos del nivel, para no recorrer la decoracion
+    struct ObjectIndex {
+        std::vector<std::pair<float, GameObject*>> fixed; // sin grupos, ordenados por X
+        std::vector<GameObject*> movable;                 // con grupos: pueden moverse
+        int indexed = -1;                                 // objetos que tenia el nivel
+    };
+
+    ObjectIndex s_index;
+
     // Como acelera la nave, medido mientras se juega
     struct ShipModel {
         float accel[2][2] = {};  // [pulsado][subiendo]
@@ -76,7 +114,7 @@ namespace {
     bool isStraight(PlayerObject* p, WaveState const& w) {
         return p->m_isShip && !p->m_isPlatformer && !p->m_isDashing
             && w.taps >= 3 && w.sincePress <= SPAM_GAP
-            && Mod::get()->getSettingValue<bool>("ship-straight");
+            && s_cfg.shipStraight;
     }
 
     // Ticks que se miran hacia delante
@@ -168,7 +206,7 @@ namespace {
 class $modify(ClickFixLayer, GJBaseGameLayer) {
     // Solo en niveles jugados, no en el editor
     bool isActive() {
-        return Mod::get()->getSettingValue<bool>("enabled")
+        return s_cfg.enabled
             && static_cast<GJBaseGameLayer*>(PlayLayer::get()) == this;
     }
 
@@ -181,20 +219,48 @@ class $modify(ClickFixLayer, GJBaseGameLayer) {
         PlayLayer::get()->m_isTestMode = true;
     }
 
-    // Bloques y pinchos cercanos al jugador
-    std::vector<HitObstacle> nearbyObstacles(float x) {
-        std::vector<HitObstacle> result;
-        if (!m_objects) return result;
-        for (unsigned int i = 0; i < m_objects->count(); i++) {
+    void buildIndex() {
+        s_index = ObjectIndex{};
+        int total = static_cast<int>(m_objects->count());
+        for (int i = 0; i < total; i++) {
             auto obj = static_cast<GameObject*>(m_objects->objectAtIndex(i));
-            if (std::abs(obj->getPositionX() - x) > 250.f) continue;
             auto type = obj->m_objectType;
             if (type != GameObjectType::Solid && type != GameObjectType::Hazard
                 && type != GameObjectType::AnimatedHazard) continue;
-            if (obj->m_isNoTouch || obj->m_isGroupDisabled) continue;
+            if (obj->m_groupCount > 0) s_index.movable.push_back(obj);
+            else s_index.fixed.push_back({ obj->getPositionX(), obj });
+        }
+        std::sort(s_index.fixed.begin(), s_index.fixed.end(),
+            [](auto const& a, auto const& b) { return a.first < b.first; });
+        s_index.indexed = total;
+    }
+
+    // Bloques y pinchos que estan en el tramo que va a recorrer el jugador
+    std::vector<HitObstacle> nearbyObstacles(CCRect const& box, float travel) {
+        std::vector<HitObstacle> result;
+        if (!m_objects) return result;
+        if (s_index.indexed != static_cast<int>(m_objects->count())) this->buildIndex();
+
+        float x = box.getMidX();
+        float from = box.getMinX() + std::min(travel, 0.f) - 2.f;
+        float to = box.getMaxX() + std::max(travel, 0.f) + 2.f;
+
+        auto add = [&](GameObject* obj) {
+            if (obj->m_isNoTouch || obj->m_isGroupDisabled) return;
             float scale = std::max(std::abs(obj->getScaleX()), std::abs(obj->getScaleY()));
-            result.push_back({ obj->getObjectRect(), obj->m_objectRadius * scale,
-                type == GameObjectType::Solid });
+            float radius = obj->m_objectRadius * scale;
+            CCRect rect = obj->getObjectRect();
+            if (std::max(rect.getMaxX(), rect.getMidX() + radius) < from) return;
+            if (std::min(rect.getMinX(), rect.getMidX() - radius) > to) return;
+            result.push_back({ rect, radius, obj->m_objectType == GameObjectType::Solid });
+        };
+
+        auto it = std::lower_bound(s_index.fixed.begin(), s_index.fixed.end(), x - 250.f,
+            [](auto const& entry, float value) { return entry.first < value; });
+        for (; it != s_index.fixed.end() && it->first <= x + 250.f; ++it) add(it->second);
+
+        for (auto obj : s_index.movable) {
+            if (std::abs(obj->getPositionX() - x) <= 250.f) add(obj);
         }
         return result;
     }
@@ -204,12 +270,11 @@ class $modify(ClickFixLayer, GJBaseGameLayer) {
         if (player->m_isPlatformer || player->m_isSideways || player->m_isDashing) return base;
         if (wave.step <= 0.01f || wave.step > 20.f) return base;
 
-        int maxDelay = static_cast<int>(
-            Mod::get()->getSettingValue<int64_t>("wave-max-delay"));
+        int maxDelay = s_cfg.waveMaxDelay;
         int horizon = base + maxDelay + LOOKAHEAD;
         CCRect box = player->getObjectRect();
-        auto obstacles = this->nearbyObstacles(box.getMidX());
         float dx = player->m_isGoingLeft ? -wave.step : wave.step;
+        auto obstacles = this->nearbyObstacles(box, dx * horizon);
         float dy = player->m_vehicleSize < 1.f ? wave.step * 2.f : wave.step;
 
         auto hit = [&](int delay) {
@@ -238,12 +303,11 @@ class $modify(ClickFixLayer, GJBaseGameLayer) {
         // Sin datos suficientes todavia no se predice nada
         if (!model.known(wave.held) || !model.known(down)) return base;
 
-        int maxDelay = static_cast<int>(
-            Mod::get()->getSettingValue<int64_t>("ship-max-delay"));
+        int maxDelay = s_cfg.shipMaxDelay;
         int horizon = base + maxDelay + SHIP_LOOKAHEAD;
         CCRect box = player->getObjectRect();
-        auto obstacles = this->nearbyObstacles(box.getMidX());
         float dx = player->m_isGoingLeft ? -wave.step : wave.step;
+        auto obstacles = this->nearbyObstacles(box, dx * horizon);
 
         auto hit = [&](int delay) {
             return firstShipHit(box, obstacles, model, dx, wave.vy,
@@ -307,11 +371,10 @@ class $modify(ClickFixLayer, GJBaseGameLayer) {
         // Volando recto no se retrasa nada, para no cambiar el ritmo
         if (down != wave.held && !isStraight(player, wave)) {
             if (!down) {
-                int minTap = static_cast<int>(Mod::get()->getSettingValue<int64_t>(
-                    ship ? "ship-min-tap" : "wave-min-tap"));
+                int minTap = ship ? s_cfg.shipMinTap : s_cfg.waveMinTap;
                 delay = std::max(0, minTap - wave.heldFor);
             }
-            if (Mod::get()->getSettingValue<bool>(ship ? "ship-predict" : "wave-predict")) {
+            if (ship ? s_cfg.shipPredict : s_cfg.wavePredict) {
                 delay = ship
                     ? this->predictShipDelay(player, wave, down, delay)
                     : this->predictDelay(player, wave, down, delay);
@@ -341,8 +404,7 @@ class $modify(ClickFixLayer, GJBaseGameLayer) {
         if (wave.sincePress < 1000) wave.sincePress++;
         // Vuelo recto: durante el spam se frena la subida y la bajada
         if (!player->m_isDead && isStraight(player, wave)) {
-            double strength = static_cast<double>(
-                Mod::get()->getSettingValue<int64_t>("ship-straight-strength"));
+            double strength = s_cfg.straightStrength;
             if (strength > 0) {
                 player->m_yVelocity *= 1.0 - strength * 0.0015;
                 this->markAssist();
@@ -384,8 +446,7 @@ class $modify(ClickFixLayer, GJBaseGameLayer) {
             if (down) {
                 pending = Pending{};
                 if (player && needsSurface(player) && !player->m_isDead && !canActNow(player)) {
-                    pending.ticks = static_cast<int>(
-                        Mod::get()->getSettingValue<int64_t>("window-ticks"));
+                    pending.ticks = s_cfg.windowTicks;
                     pending.isPlayer1 = isPlayer1;
                 }
             }
@@ -397,6 +458,11 @@ class $modify(ClickFixLayer, GJBaseGameLayer) {
     }
 
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+        // Relee los ajustes de vez en cuando por si se cambian en la pausa
+        if (--s_reloadIn <= 0) {
+            s_cfg.load();
+            s_reloadIn = 120;
+        }
         if (this->isActive()) {
             for (int slot = 0; slot < 2; slot++) {
                 auto& pending = s_pending[slot];
@@ -444,6 +510,8 @@ class $modify(ClickFixPlayLayer, PlayLayer) {
         s_usedAssist = false;
         s_ship[0] = ShipModel{};
         s_ship[1] = ShipModel{};
+        s_index = ObjectIndex{};
+        s_cfg.load();
         if (!PlayLayer::init(level, dontCreateObjects)) return false;
         s_oldTestMode = m_isTestMode;
         return true;
@@ -451,6 +519,7 @@ class $modify(ClickFixPlayLayer, PlayLayer) {
 
     void resetLevel() {
         clearPending();
+        s_cfg.load();
         // Un intento nuevo empieza limpio
         if (s_usedAssist) {
             m_isTestMode = s_oldTestMode;
