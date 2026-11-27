@@ -6,9 +6,9 @@
     },
     "id": "usuario.click-fix",
     "name": "Click Fix",
-    "version": "v1.1.0",
+    "version": "v1.2.0",
     "developer": "Usuario",
-    "description": "Corrige clicks adelantados y ayuda en wave.",
+    "description": "Corrige clicks adelantados y ayuda en wave y nave.",
     "settings": {
         "enabled": {
             "type": "bool",
@@ -43,6 +43,41 @@
             "default": 3,
             "min": 1,
             "max": 8
+        },
+        "ship-min-tap": {
+            "type": "int",
+            "name": "Nave: toque minimo (ticks)",
+            "description": "0 lo desactiva.",
+            "default": 3,
+            "min": 0,
+            "max": 20
+        },
+        "ship-predict": {
+            "type": "bool",
+            "name": "Nave: prediccion",
+            "description": "Aproximada. Aprende como se mueve la nave mientras juegas.",
+            "default": true
+        },
+        "ship-max-delay": {
+            "type": "int",
+            "name": "Nave: retraso maximo (ticks)",
+            "default": 4,
+            "min": 1,
+            "max": 12
+        },
+        "ship-straight": {
+            "type": "bool",
+            "name": "Nave: vuelo recto",
+            "description": "Al hacer spam, frena la subida y la bajada.",
+            "default": true
+        },
+        "ship-straight-strength": {
+            "type": "int",
+            "name": "Nave: fuerza del vuelo recto",
+            "description": "Mas alto = mas recto. 0 lo desactiva.",
+            "default": 40,
+            "min": 0,
+            "max": 100
         }
     }
 }
