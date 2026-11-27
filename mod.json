@@ -1,0 +1,27 @@
+{
+    "geode": "6.0.0",
+    "gd": {
+        "android": "2.2091",
+        "win": "2.2091"
+    },
+    "id": "usuario.click-fix",
+    "name": "Click Fix",
+    "version": "v1.0.0",
+    "developer": "Usuario",
+    "description": "Guarda los clicks adelantados y los aplica al aterrizar o tocar un orbe.",
+    "settings": {
+        "enabled": {
+            "type": "bool",
+            "name": "Activado",
+            "default": true
+        },
+        "window-ticks": {
+            "type": "int",
+            "name": "Margen (ticks)",
+            "description": "Cuanto antes puedes pulsar. 1 tick son unos 4 ms.",
+            "default": 12,
+            "min": 1,
+            "max": 48
+        }
+    }
+}
